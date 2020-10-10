@@ -1,0 +1,19 @@
+# See issues in
+#https://serverfault.com/questions/736624/systemd-service-automatic-restart-after-startlimitinterval/962338
+
+[Unit]
+Description=Smart Meter Detector
+StartLimitBurst=5
+StartLimitIntervalSec=33
+
+[Service]
+Type=simple
+ExecStart=smart-meter-detector -r http://192.168.x.y:8086 -l "Office"
+Restart=on-failure
+#Restart=always
+RestartSec=5
+#ExecStart=/bin/sleep 6
+StartLimitAction=reboot
+
+[Install]
+WantedBy=default.target

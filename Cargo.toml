@@ -1,0 +1,6 @@
+[workspace]
+
+members = [
+    "smart-meter-parser",
+    "smart-meter-detector-cli",
+]
