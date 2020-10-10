@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -e
+
+mkdir -p plugins/
+
+grafana-server \
+    -config ./grafana.ini \
+    -homepath /usr/share/grafana \
+    cfg:default.paths.logs=$PWD \
+    cfg:default.paths.data=$PWD \
+    cfg:default.paths.plugins=$PWD/plugins
+
+exit 0
