@@ -221,6 +221,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "err-derive"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22deed3a8124cff5fa835713fa105621e43bbdc46690c3a6b68328a012d350d4"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn",
+ "synstructure",
+]
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -691,6 +705,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustversion"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9bdc5e856e51e685846fb6c13a1f5e5432946c2c90501bdc76a1319f19e29da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -777,6 +802,7 @@ dependencies = [
  "crossbeam",
  "ctrlc",
  "env_logger",
+ "err-derive",
  "influx_db_client",
  "log 0.4.11",
  "rtlsdr_mt",
@@ -839,6 +865,18 @@ checksum = "1e2e59c50ed8f6b050b071aa7b6865293957a9af6b58b94f97c1c9434ad440ea"
 dependencies = [
  "proc-macro2",
  "quote",
+ "unicode-xid",
+]
+
+[[package]]
+name = "synstructure"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b834f2d66f734cb897113e34aaff2f1ab4719ca946f9a7358dba8f8064148701"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
  "unicode-xid",
 ]
 

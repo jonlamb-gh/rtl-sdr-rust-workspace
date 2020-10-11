@@ -16,6 +16,7 @@ structopt = "0.3"
 chrono = "0.4"
 crossbeam = "0.7"
 influx_db_client = "0.3.6"
+err-derive = "0.2"
 
 [dependencies.ctrlc]
 version = "3.1"

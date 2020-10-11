@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use crossbeam::crossbeam_channel;
+use err_derive::Error;
 use influx_db_client::{Client, Point, Precision, Value};
 use log::{debug, error, info, warn};
 use smart_meter_parser::{protocols::*, Decoder, ProtocolParser, ScmParser};
@@ -7,8 +8,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::{io, process};
 use structopt::StructOpt;
-
-// TODO - redo the error types
 
 #[derive(Debug, Clone, PartialEq, StructOpt)]
 #[structopt(
@@ -73,10 +72,19 @@ pub struct Detection {
     pub location: String,
 }
 
-fn main() -> Result<(), io::Error> {
+fn main() -> Result<(), Error> {
     let opts = Opts::from_args();
     env_logger::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
+    let result = run(opts);
+    if let Err(e) = &result {
+        print_error(e);
+    }
+
+    result
+}
+
+fn run(opts: Opts) -> Result<(), Error> {
     info!("Remote: {}", opts.remote);
     info!("Database: {}", opts.database);
     info!("Measurement name: {}", opts.measurement_name);
@@ -85,15 +93,12 @@ fn main() -> Result<(), io::Error> {
     let client = Client::new(opts.remote, opts.database.clone());
     //.set_authentication("root", "root");
 
-    client.create_database(&opts.database).map_err(|e| {
-        error!("Create database {:?}", e);
-        io::Error::new(io::ErrorKind::Other, "database")
-    })?;
+    if !opts.no_remote {
+        debug!("Creating database {}", &opts.database);
+        client.create_database(&opts.database)?;
+    }
 
-    let (mut ctl, mut reader) = rtlsdr_mt::open(opts.device_index).map_err(|e| {
-        error!("Open device {:?}", e);
-        io::Error::new(io::ErrorKind::Other, "device")
-    })?;
+    let (mut ctl, mut reader) = rtlsdr_mt::open(opts.device_index)?;
 
     let default_config = DeviceConfig {
         center_freq: ScmParser::PACKET_CONFIG.center_freq as _,
@@ -103,10 +108,7 @@ fn main() -> Result<(), io::Error> {
         agc: true,
     };
 
-    default_config.apply(&mut ctl).map_err(|e| {
-        error!("Device config {:?}", e);
-        io::Error::new(io::ErrorKind::Other, "device")
-    })?;
+    default_config.apply(&mut ctl)?;
 
     let running = Arc::new(AtomicUsize::new(0));
     let r = running.clone();
@@ -120,15 +122,13 @@ fn main() -> Result<(), io::Error> {
             warn!("Forcing exit");
             process::exit(0);
         }
-    })
-    .expect("Error setting Ctrl-C handler");
+    })?;
 
     let pkt_cfg = ScmParser::PACKET_CONFIG;
 
     let (samples_tx, samples_rx) = crossbeam_channel::unbounded();
 
-    // TODO - since this is already threaded,
-    // might be better to use the synchronous interface
+    // TODO - try the synchronous interface
     let recv_thread = std::thread::spawn(move || {
         info!("Recv thread started");
 
@@ -169,7 +169,7 @@ fn main() -> Result<(), io::Error> {
             let mut messages = Vec::new();
             for chunk in samples.iq_data.chunks_exact(dec.input_size()) {
                 for msg in dec.decode(&chunk[..]).iter() {
-                    //println!("{:?}", msg);
+                    //debug!("{:?}", msg);
                     messages.push(*msg);
                 }
             }
@@ -183,7 +183,7 @@ fn main() -> Result<(), io::Error> {
                         rms_power_mean,
                         messages,
                     })
-                    .expect("Database send");
+                    .expect("Decoder send");
             }
         }
 
@@ -194,43 +194,47 @@ fn main() -> Result<(), io::Error> {
         let msg = if let Ok(m) = msg_rx.recv() {
             m
         } else {
-            info!("Rx error exit");
+            warn!("Rx error exit");
             break;
         };
 
         debug!("Processing {:?}", msg);
 
-        let rms_power_max = msg.rms_power_max;
-        let rms_power_mean = msg.rms_power_mean;
-        let recv_time = msg.time;
-        for m in msg.messages.iter() {
-            let mut point = Point::new(&opts.measurement_name);
-            point.add_timestamp(recv_time.timestamp());
-            //point.add_field("id", Value::Integer(m.id.get() as _));
-            point.add_field("physical_tamper", Value::Integer(m.physical_tamper as _));
-            point.add_field("encoder_tamper", Value::Integer(m.encoder_tamper as _));
-            point.add_field("consumption", Value::Integer(m.consumption as _));
-            point.add_field("rms_power_max", Value::Float(rms_power_max));
-            point.add_field("rms_power_mean", Value::Float(rms_power_mean));
-            point.add_tag("id", Value::Integer(m.id.get() as _));
-            point.add_tag(
-                "commodity_type",
-                Value::Integer(u8::from(m.commodity_type) as _),
-            );
-            point.add_tag("location", Value::String(opts.location_tag.clone()));
+        if !opts.no_remote {
+            let rms_power_max = msg.rms_power_max;
+            let rms_power_mean = msg.rms_power_mean;
+            let recv_time = msg.time;
+            for m in msg.messages.iter() {
+                let mut point = Point::new(&opts.measurement_name);
+                point.add_timestamp(recv_time.timestamp());
+                //point.add_field("id", Value::Integer(m.id.get() as _));
+                point.add_field("physical_tamper", Value::Integer(m.physical_tamper as _));
+                point.add_field("encoder_tamper", Value::Integer(m.encoder_tamper as _));
+                point.add_field("consumption", Value::Integer(m.consumption as _));
+                point.add_field("rms_power_max", Value::Float(rms_power_max));
+                point.add_field("rms_power_mean", Value::Float(rms_power_mean));
+                point.add_tag("id", Value::Integer(m.id.get() as _));
+                point.add_tag(
+                    "commodity_type",
+                    Value::Integer(u8::from(m.commodity_type) as _),
+                );
+                point.add_tag("location", Value::String(opts.location_tag.clone()));
 
-            // TODO - batch write all the recv'd messages
-            let result = client.write_point(point, Some(Precision::Seconds), None);
-            if let Err(e) = result {
-                warn!("Failed to write db {:?}", e);
+                debug!("Database point {:?}", point);
+
+                // TODO - batch write all the recv'd messages
+                let result = client.write_point(point, Some(Precision::Seconds), None);
+                if let Err(e) = result {
+                    warn!("Failed to write db {:?}", e);
+                }
             }
         }
     }
 
     running.fetch_add(1, Ordering::SeqCst);
     std::thread::sleep(std::time::Duration::from_secs(1));
-    recv_thread.join().unwrap();
-    decode_thread.join().unwrap();
+    recv_thread.join().expect("Recv thread join failed");
+    decode_thread.join().expect("Decode thread join failed");
 
     info!("All done");
 
@@ -257,5 +261,53 @@ impl DeviceConfig {
             controller.disable_agc()?;
         }
         Ok(())
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error(display = "Encountered an IO error: {}", _0)]
+    Io(io::Error),
+
+    #[error(display = "Encountered a database error: {}", _0)]
+    Database(influx_db_client::Error),
+
+    #[error(display = "Encountered a device error: {:?}", _0)]
+    Device(rtlsdr_mt::Error),
+
+    #[error(display = "Encountered a ctrlc error: {}", _0)]
+    Ctrlc(ctrlc::Error),
+}
+
+fn print_error(e: &dyn std::error::Error) {
+    error!("{}", e);
+    let mut cause = e.source();
+    while let Some(e) = cause {
+        error!("Caused by: {}", e);
+        cause = e.source();
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        Error::Io(e)
+    }
+}
+
+impl From<influx_db_client::Error> for Error {
+    fn from(e: influx_db_client::Error) -> Self {
+        Error::Database(e)
+    }
+}
+
+impl From<rtlsdr_mt::Error> for Error {
+    fn from(_e: rtlsdr_mt::Error) -> Self {
+        Error::Device(())
+    }
+}
+
+impl From<ctrlc::Error> for Error {
+    fn from(e: ctrlc::Error) -> Self {
+        Error::Ctrlc(e)
     }
 }
